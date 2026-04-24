@@ -11,6 +11,7 @@ func NewRouter() http.Handler {
 
 	r.Post("/upload", UploadHandler)
 	r.Get("/files", ListHandler)
+	r.Get("/download/{id}", DownloadHandler)
 	r.Delete("/files/{id}", DeleteHandler)
 
 	return r

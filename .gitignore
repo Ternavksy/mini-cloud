@@ -1,0 +1,37 @@
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+mini-cloud
+cli
+
+vendor/
+
+# Environment
+.env
+.env.local
+
+# Storage
+storage/
+storage_file/
+
+# Logs
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+.DS_Store
+Thumbs.db
+
+.dockerignore
+
+*.tmp
+*.temp
