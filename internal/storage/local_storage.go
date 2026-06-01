@@ -18,6 +18,10 @@ func New(basePath string) *LocalStorage {
 
 func (s *LocalStorage) Save(id string, r io.Reader) error {
 	path := filepath.Join(s.basePath, id)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+
 	file, err := os.Create(path)
 	if err != nil {
 		return err
@@ -44,15 +48,24 @@ func (s *LocalStorage) Delete(id string) error {
 
 func (s *LocalStorage) List() ([]string, error) {
 	var files []string
-	entries, err := os.ReadDir(s.basePath)
+	err := filepath.WalkDir(s.basePath, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+
+		relativePath, err := filepath.Rel(s.basePath, path)
+		if err != nil {
+			return err
+		}
+		files = append(files, filepath.ToSlash(relativePath))
+		return nil
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to read directory: %w", err)
 	}
 
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			files = append(files, entry.Name())
-		}
-	}
 	return files, nil
 }
