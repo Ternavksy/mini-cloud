@@ -15,7 +15,7 @@ vendor/
 .env.local
 
 # Storage
-storage/
+/storage/
 storage_file/
 
 # Logs

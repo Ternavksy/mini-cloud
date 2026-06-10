@@ -4,15 +4,18 @@ import (
 	"context"
 	"errors"
 	"log"
+	"mini-cloud/internal/database"
 	"mini-cloud/internal/filecollections"
 	"mini-cloud/internal/server"
 	"mini-cloud/internal/storage"
 	"net/http"
+	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
 )
 
 var serverCmd = &cobra.Command{
@@ -24,7 +27,17 @@ var serverCmd = &cobra.Command{
 			log.Fatal("failed to initialize storage: ", err)
 		}
 
-		collections := filecollections.NewService(store)
+		metadataPath := os.Getenv("METADATA_DB_PATH")
+		if metadataPath == "" {
+			metadataPath = "./metadata.db"
+		}
+		metadataDB, err := database.Open(context.Background(), metadataPath)
+		if err != nil {
+			log.Fatal("failed to initialize metadata database: ", err)
+		}
+		defer metadataDB.Close()
+
+		collections := filecollections.NewSQLService(metadataDB)
 		handler := server.NewRouter(store, collections)
 
 		httpServer := &http.Server{
@@ -36,30 +49,32 @@ var serverCmd = &cobra.Command{
 		defer stop()
 
 		log.Println("server started on :8080")
-		errCh := make(chan error, 1)
-		go func() {
-			errCh <- httpServer.ListenAndServe()
-		}()
+		group, groupCtx := errgroup.WithContext(ctx)
+		shutdownStarted := make(chan struct{})
 
-		select {
-		case <-ctx.Done():
-			log.Println("server shutdown started")
-		case err := <-errCh:
+		group.Go(func() error {
+			err := httpServer.ListenAndServe()
 			if err != nil && !errors.Is(err, http.ErrServerClosed) {
-				log.Fatal("server failed: ", err)
+				return err
 			}
-			return
-		}
+			return nil
+		})
 
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
+		group.Go(func() error {
+			<-groupCtx.Done()
+			close(shutdownStarted)
 
-		if err := httpServer.Shutdown(shutdownCtx); err != nil {
-			log.Fatal("server shutdown failed: ", err)
-		}
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
 
-		if err := <-errCh; err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatal("server failed during shutdown: ", err)
+			return httpServer.Shutdown(shutdownCtx)
+		})
+
+		<-shutdownStarted
+		log.Println("server shutdown started")
+
+		if err := group.Wait(); err != nil {
+			log.Fatal("server failed: ", err)
 		}
 		log.Println("server stopped")
 	},

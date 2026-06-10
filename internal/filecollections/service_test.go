@@ -3,6 +3,7 @@ package filecollections
 import (
 	"testing"
 
+	"mini-cloud/internal/models"
 	"mini-cloud/internal/storage"
 )
 
@@ -10,7 +11,7 @@ func TestServiceCreateListGetAndRemoveFile(t *testing.T) {
 	store := storage.New(t.TempDir())
 	service := NewService(store)
 
-	created, err := service.Create("summer album", []string{"file-1", "file-2", "file-1", ""})
+	created, err := service.Create("summer album", []models.FileID{"file-1", "file-2", "file-1", ""})
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}

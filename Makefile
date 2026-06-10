@@ -5,6 +5,7 @@ help:
 	@echo "  make minio-down    - Stop MinIO"
 	@echo "  make deps          - Download Go dependencies"
 	@echo "  make build         - Build the application"
+	@echo "  make generate      - Generate API and test mock code"
 	@echo "  make run           - Run the application"
 	@echo "  make dev           - Run with S3 storage"
 	@echo "  make local         - Run with local storage"
@@ -31,6 +32,10 @@ deps:
 .PHONY: build
 build:
 	go build -o mini-cloud main.go
+
+.PHONY: generate
+generate:
+	go generate ./internal/api ./internal/server
 
 .PHONY: run
 run: build

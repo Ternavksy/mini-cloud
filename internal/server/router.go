@@ -1,14 +1,12 @@
 package server
 
 import (
-	"mini-cloud/internal/filecollections"
-	"mini-cloud/internal/storage"
 	"net/http"
 
 	"github.com/go-chi/chi"
 )
 
-func NewRouter(store storage.Storage, collections filecollections.Service) http.Handler {
+func NewRouter(store fileStore, collections collectionService) http.Handler {
 	r := chi.NewRouter()
 	handler := NewHandler(store, collections)
 

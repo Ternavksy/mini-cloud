@@ -5,10 +5,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 )
 
 type LocalStorage struct {
 	basePath string
+	mu       sync.RWMutex
 }
 
 func New(basePath string) *LocalStorage {
@@ -17,6 +19,9 @@ func New(basePath string) *LocalStorage {
 }
 
 func (s *LocalStorage) Save(id string, r io.Reader) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	path := filepath.Join(s.basePath, id)
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
@@ -33,6 +38,9 @@ func (s *LocalStorage) Save(id string, r io.Reader) error {
 }
 
 func (s *LocalStorage) Get(id string) (io.ReadCloser, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	path := filepath.Join(s.basePath, id)
 	file, err := os.Open(path)
 	if err != nil {
@@ -42,11 +50,17 @@ func (s *LocalStorage) Get(id string) (io.ReadCloser, error) {
 }
 
 func (s *LocalStorage) Delete(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	path := filepath.Join(s.basePath, id)
 	return os.Remove(path)
 }
 
 func (s *LocalStorage) List() ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	var files []string
 	err := filepath.WalkDir(s.basePath, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {

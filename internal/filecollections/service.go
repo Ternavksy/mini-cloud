@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 	"mini-cloud/internal/models"
-	"mini-cloud/internal/storage"
+	"slices"
 	"strings"
 	"time"
 
@@ -19,34 +19,41 @@ const (
 	indexKey       = metadataPrefix + "index.json"
 )
 
-var ErrCollectionNotFound = errors.New("file collection not found")
+var ErrCollectionNotFound = NotFoundError{Entity: "file collection"}
 
-type Service interface {
-	List() ([]models.FileCollection, error)
-	Create(name string, fileIDs []string) (models.FileCollection, error)
-	Get(id string) (models.FileCollection, error)
-	AddFile(collectionID, fileID string) (models.FileCollection, error)
-	RemoveFile(collectionID, fileID string) (models.FileCollection, error)
+type NotFoundError struct {
+	Entity string
+}
+
+func (e NotFoundError) Error() string {
+	return e.Entity + " not found"
+}
+
+func (e NotFoundError) Is(target error) bool {
+	_, ok := target.(NotFoundError)
+	return ok
+}
+
+type objectStore interface {
+	Save(id string, r io.Reader) error
+	Get(id string) (io.ReadCloser, error)
 	Delete(id string) error
+	List() ([]string, error)
 }
 
-type service struct {
-	store storage.Storage
+type Service struct {
+	store objectStore
 }
 
-type collectionIndex struct {
-	IDs []string `json:"ids"`
-}
-
-func NewService(store storage.Storage) Service {
-	return &service{store: store}
+func NewService(store objectStore) *Service {
+	return &Service{store: store}
 }
 
 func IsMetadataKey(key string) bool {
 	return strings.HasPrefix(key, metadataPrefix)
 }
 
-func (s *service) List() ([]models.FileCollection, error) {
+func (s *Service) List() ([]models.FileCollection, error) {
 	index, err := s.readIndex()
 	if err != nil {
 		return nil, err
@@ -64,7 +71,7 @@ func (s *service) List() ([]models.FileCollection, error) {
 	return collections, nil
 }
 
-func (s *service) Create(name string, fileIDs []string) (models.FileCollection, error) {
+func (s *Service) Create(name string, fileIDs []models.FileID) (models.FileCollection, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return models.FileCollection{}, fmt.Errorf("collection name is required")
@@ -76,10 +83,12 @@ func (s *service) Create(name string, fileIDs []string) (models.FileCollection, 
 	}
 
 	collection := models.FileCollection{
-		ID:        uuid.New().String(),
-		Name:      name,
-		FileIDs:   normalizeFileIDs(fileIDs),
-		CreatedAt: time.Now().UTC(),
+		BaseModel: models.BaseModel{
+			ID:        models.CollectionID(uuid.New().String()),
+			CreatedAt: time.Now().UTC(),
+		},
+		Name:    name,
+		FileIDs: normalizeFileIDs(fileIDs),
 	}
 
 	if err := s.saveCollection(collection); err != nil {
@@ -94,8 +103,8 @@ func (s *service) Create(name string, fileIDs []string) (models.FileCollection, 
 	return collection, nil
 }
 
-func (s *service) Get(id string) (models.FileCollection, error) {
-	id = strings.TrimSpace(id)
+func (s *Service) Get(id models.CollectionID) (models.FileCollection, error) {
+	id = models.CollectionID(strings.TrimSpace(string(id)))
 	if id == "" {
 		return models.FileCollection{}, ErrCollectionNotFound
 	}
@@ -122,8 +131,8 @@ func (s *service) Get(id string) (models.FileCollection, error) {
 	return collection, nil
 }
 
-func (s *service) AddFile(collectionID, fileID string) (models.FileCollection, error) {
-	fileID = strings.TrimSpace(fileID)
+func (s *Service) AddFile(collectionID models.CollectionID, fileID models.FileID) (models.FileCollection, error) {
+	fileID = models.FileID(strings.TrimSpace(string(fileID)))
 	if fileID == "" {
 		return models.FileCollection{}, fmt.Errorf("file id is required")
 	}
@@ -141,8 +150,8 @@ func (s *service) AddFile(collectionID, fileID string) (models.FileCollection, e
 	return collection, nil
 }
 
-func (s *service) RemoveFile(collectionID, fileID string) (models.FileCollection, error) {
-	fileID = strings.TrimSpace(fileID)
+func (s *Service) RemoveFile(collectionID models.CollectionID, fileID models.FileID) (models.FileCollection, error) {
+	fileID = models.FileID(strings.TrimSpace(string(fileID)))
 	if fileID == "" {
 		return models.FileCollection{}, fmt.Errorf("file id is required")
 	}
@@ -160,8 +169,8 @@ func (s *service) RemoveFile(collectionID, fileID string) (models.FileCollection
 	return collection, nil
 }
 
-func (s *service) Delete(id string) error {
-	id = strings.TrimSpace(id)
+func (s *Service) Delete(id models.CollectionID) error {
+	id = models.CollectionID(strings.TrimSpace(string(id)))
 	if id == "" {
 		return ErrCollectionNotFound
 	}
@@ -182,11 +191,15 @@ func (s *service) Delete(id string) error {
 	if err != nil {
 		return err
 	}
-	index.IDs = removeFileID(index.IDs, id)
+	index.IDs = removeCollectionID(index.IDs, id)
 	return s.writeIndex(index)
 }
 
-func (s *service) readIndex() (collectionIndex, error) {
+type collectionIndex struct {
+	IDs []models.CollectionID `json:"ids"`
+}
+
+func (s *Service) readIndex() (collectionIndex, error) {
 	exists, err := s.objectExists(indexKey)
 	if err != nil {
 		return collectionIndex{}, err
@@ -209,7 +222,7 @@ func (s *service) readIndex() (collectionIndex, error) {
 	return index, nil
 }
 
-func (s *service) writeIndex(index collectionIndex) error {
+func (s *Service) writeIndex(index collectionIndex) error {
 	data, err := json.Marshal(index)
 	if err != nil {
 		return err
@@ -217,7 +230,7 @@ func (s *service) writeIndex(index collectionIndex) error {
 	return s.store.Save(indexKey, bytes.NewReader(data))
 }
 
-func (s *service) saveCollection(collection models.FileCollection) error {
+func (s *Service) saveCollection(collection models.FileCollection) error {
 	data, err := json.Marshal(collection)
 	if err != nil {
 		return err
@@ -225,31 +238,29 @@ func (s *service) saveCollection(collection models.FileCollection) error {
 	return s.store.Save(collectionKey(collection.ID), bytes.NewReader(data))
 }
 
-func (s *service) objectExists(key string) (bool, error) {
+func (s *Service) objectExists(key string) (bool, error) {
 	keys, err := s.store.List()
 	if err != nil {
 		return false, err
 	}
 
-	for _, existingKey := range keys {
-		if existingKey == key {
-			return true, nil
-		}
+	if slices.Contains(keys, key) {
+		return true, nil
 	}
 
 	return false, nil
 }
 
-func collectionKey(id string) string {
-	return metadataPrefix + id + ".json"
+func collectionKey(id models.CollectionID) string {
+	return metadataPrefix + string(id) + ".json"
 }
 
-func normalizeFileIDs(fileIDs []string) []string {
-	seen := make(map[string]struct{}, len(fileIDs))
-	result := make([]string, 0, len(fileIDs))
+func normalizeFileIDs(fileIDs []models.FileID) []models.FileID {
+	seen := make(map[models.FileID]struct{}, len(fileIDs))
+	result := make([]models.FileID, 0, len(fileIDs))
 
 	for _, fileID := range fileIDs {
-		fileID = strings.TrimSpace(fileID)
+		fileID = models.FileID(strings.TrimSpace(string(fileID)))
 		if fileID == "" {
 			continue
 		}
@@ -263,11 +274,21 @@ func normalizeFileIDs(fileIDs []string) []string {
 	return result
 }
 
-func removeFileID(fileIDs []string, fileID string) []string {
+func removeFileID(fileIDs []models.FileID, fileID models.FileID) []models.FileID {
 	result := fileIDs[:0]
 	for _, existingFileID := range fileIDs {
 		if existingFileID != fileID {
 			result = append(result, existingFileID)
+		}
+	}
+	return result
+}
+
+func removeCollectionID(collectionIDs []models.CollectionID, collectionID models.CollectionID) []models.CollectionID {
+	result := collectionIDs[:0]
+	for _, existingCollectionID := range collectionIDs {
+		if existingCollectionID != collectionID {
+			result = append(result, existingCollectionID)
 		}
 	}
 	return result
